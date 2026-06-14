@@ -5,39 +5,10 @@ from typing import Any, Dict, List, Optional
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-
-# =========================================================
-# CONFIG
-# =========================================================
-
 SERVICE_ACCOUNT_FILE = "firebase-key.json"
 PLAYERS_COLLECTION = "players"
 PLAYER_SEARCH_CACHE_COLLECTION = "player_search_cache"
 
-
-# =========================================================
-# FIREBASE INIT
-# =========================================================
-
-def _init_firebase():
-    if not firebase_admin._apps:
-        if not os.path.exists(SERVICE_ACCOUNT_FILE):
-            raise FileNotFoundError(
-                f"Firebase key bestand niet gevonden: {SERVICE_ACCOUNT_FILE}"
-            )
-
-        cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
-        firebase_admin.initialize_app(cred)
-
-    return firestore.client()
-
-
-db = _init_firebase()
-
-
-# =========================================================
-# HELPERS
-# =========================================================
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -111,9 +82,45 @@ def normalize_search_key(name_query: str, club: Optional[str] = None, sport: str
     return f"{sport}|{name_query}|{club}"
 
 
-# =========================================================
-# PLAYERS CRUD
-# =========================================================
+def _load_streamlit_secrets_credentials() -> Optional[credentials.Certificate]:
+    try:
+        import streamlit as st
+        if "firebase" not in st.secrets:
+            return None
+        firebase_cfg = dict(st.secrets["firebase"])
+        if "private_key" in firebase_cfg:
+            firebase_cfg["private_key"] = str(firebase_cfg["private_key"]).replace("\\n", "\n")
+        return credentials.Certificate(firebase_cfg)
+    except Exception:
+        return None
+
+
+def _load_local_file_credentials() -> Optional[credentials.Certificate]:
+    if os.path.exists(SERVICE_ACCOUNT_FILE):
+        return credentials.Certificate(SERVICE_ACCOUNT_FILE)
+    return None
+
+
+def _init_firebase():
+    if firebase_admin._apps:
+        return firestore.client()
+
+    cred = _load_streamlit_secrets_credentials()
+    if cred is None:
+        cred = _load_local_file_credentials()
+
+    if cred is None:
+        raise FileNotFoundError(
+            "Geen Firebase credentials gevonden. Voeg voor lokale runs een 'firebase-key.json' toe, "
+            "of configureer Streamlit secrets met een [firebase]-blok."
+        )
+
+    firebase_admin.initialize_app(cred)
+    return firestore.client()
+
+
+db = _init_firebase()
+
 
 def save_player(player_id: str, player_data: dict):
     prepared = build_minimal_defaults(player_id, player_data)
@@ -153,10 +160,6 @@ def get_all_players(converted: bool = True):
     return result
 
 
-# =========================================================
-# PLAYER SEARCH CACHE
-# =========================================================
-
 def save_player_search_cache(name_query: str, club: Optional[str], sport: str, candidates: List[Dict[str, Any]]):
     key = normalize_search_key(name_query, club=club, sport=sport)
     doc = {
@@ -179,16 +182,3 @@ def get_player_search_cache(name_query: str, club: Optional[str] = None, sport: 
         return None
     data = doc.to_dict()
     return convert_firestore_values(data) if converted else data
-
-
-# =========================================================
-# DEBUG
-# =========================================================
-
-def print_player(player_id: str):
-    player = get_player(player_id, converted=True)
-    if not player:
-        print(f"Geen speler gevonden met id {player_id}")
-        return
-    print("=== PLAYER DOCUMENT ===")
-    print(player)
