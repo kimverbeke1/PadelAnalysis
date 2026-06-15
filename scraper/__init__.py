@@ -1,5 +1,10 @@
-from .scraper import scrape_player, find_player_and_scrape
-from .firebase_service import get_player, save_player
-from .parser import parse_matches
+"""
+Scraper package
 
-__all__ = ['scrape_player', 'find_player_and_scrape', 'get_player', 'save_player', 'parse_matches']
+Belangrijk voor cloud/deploy:
+- GEEN imports met side effects hier.
+- Anders kan een simpele import van scraper.firebase_service eerst __init__.py laden,
+  wat op zijn beurt scraper.py zou importeren.
+"""
+
+__all__ = []
