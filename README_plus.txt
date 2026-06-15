@@ -1,6 +1,6 @@
-TPV URL SEARCH FIX V2
-====================
+TPV PROFILE BUTTON FIX
+=======================
 
 Extra fix:
-- Als de TPV-resultaten na de zoek-URL nog niet zichtbaar zijn, klikt player_search.py nu expliciet op de zoekknop.
-- Zo vang je het scenario op waarbij de pagina de parameters wel ontvangt, maar pas na knopdruk de resultaten rendert.
+- player_search.py leest nu ook expliciet controls/knoppen met tekst "Profiel bekijken" uit.
+- Daardoor kan de speler-ID gevonden worden, ook als TPV geen gewone dashboard-link toont maar een profielknop/anker gebruikt.

@@ -1,8 +1,8 @@
 cd "C:\Users\verbekki\OneDrive - Spraying Systems Co\Private\PadelAnalysis"
-# Pak PadelAnalysis_tpv_click_fix.zip uit en overschrijf files
+# Pak PadelAnalysis_profile_button_fix.zip uit en overschrijf files
 
 git status
 git add .
-git commit -m "Fix TPV search requires click"
+git commit -m "Fix TPV profile button extraction"
 git push
 py -m streamlit run dashboard.py

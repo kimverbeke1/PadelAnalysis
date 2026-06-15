@@ -80,8 +80,45 @@ def extract_player_id_from_url(url: str) -> Optional[str]:
         return None
 
 
+def _candidate_from_href(href: str, text: str = "") -> Optional[Dict]:
+    if not href:
+        return None
+    full_url = urljoin(BASE_SITE_URL, href)
+    player_id = extract_player_id_from_url(full_url)
+    if not player_id:
+        return None
+    return {
+        "display_name": clean_text(text) or None,
+        "club": None,
+        "player_id": player_id,
+        "dashboard_url": full_url,
+        "source": "profile_button_or_link",
+    }
+
+
+def _dedupe_and_store(candidates: List[Dict]) -> List[Dict]:
+    unique = []
+    seen = set()
+    for c in candidates:
+        key = (c.get("player_id"), c.get("dashboard_url"))
+        if key not in seen and c.get("player_id"):
+            seen.add(key)
+            unique.append(c)
+    for c in unique:
+        save_player_profile(
+            player_id=str(c["player_id"]),
+            display_name=c.get("display_name"),
+            club=c.get("club"),
+            dashboard_url=c.get("dashboard_url"),
+            aliases=[c.get("display_name")] if c.get("display_name") else [],
+        )
+    return unique
+
+
 def extract_candidates_from_page(page) -> List[Dict]:
     candidates: List[Dict] = []
+
+    # First try classic direct dashboard links.
     try:
         links = page.locator("a")
         for i in range(links.count()):
@@ -91,40 +128,71 @@ def extract_candidates_from_page(page) -> List[Dict]:
             except Exception:
                 continue
             if "dashboard/resultaten" in href and "userId=" in href:
-                full_url = urljoin(BASE_SITE_URL, href)
-                player_id = extract_player_id_from_url(full_url)
-                candidates.append({
-                    "display_name": text or None,
-                    "club": None,
-                    "player_id": player_id,
-                    "dashboard_url": full_url,
-                    "source": "url_search",
-                })
+                c = _candidate_from_href(href, text)
+                if c:
+                    candidates.append(c)
     except Exception:
         pass
 
-    unique = []
-    seen = set()
-    for c in candidates:
-        key = (c.get("player_id"), c.get("dashboard_url"))
-        if key not in seen:
-            seen.add(key)
-            unique.append(c)
+    # Then try explicit profile buttons/links.
+    try:
+        profile_controls = page.get_by_text("Profiel bekijken", exact=False)
+        count = profile_controls.count()
+        log_line(f"Aantal 'Profiel bekijken' controls gevonden: {count}")
+        for i in range(count):
+            ctrl = profile_controls.nth(i)
+            href = None
+            label_text = None
+            try:
+                href = ctrl.get_attribute("href")
+            except Exception:
+                href = None
+            try:
+                label_text = clean_text(ctrl.inner_text(timeout=500))
+            except Exception:
+                label_text = None
 
-    for c in unique:
-        if c.get("player_id"):
-            save_player_profile(
-                player_id=str(c["player_id"]),
-                display_name=c.get("display_name"),
-                club=c.get("club"),
-                dashboard_url=c.get("dashboard_url"),
-                aliases=[c.get("display_name")] if c.get("display_name") else [],
-            )
-    return unique
+            # If the control itself has no href, inspect closest parent anchor.
+            if not href:
+                try:
+                    href = ctrl.evaluate(
+                        """el => {
+                            const a = el.closest('a');
+                            return a ? a.getAttribute('href') : null;
+                        }"""
+                    )
+                except Exception:
+                    href = None
+
+            # If still no href, inspect onclick/data attributes on the button or parent.
+            if not href:
+                try:
+                    href = ctrl.evaluate(
+                        """el => {
+                            const node = el.closest('a,button,div');
+                            if (!node) return null;
+                            const attrs = ['href','data-href','data-url','onclick'];
+                            for (const attr of attrs) {
+                                const val = node.getAttribute && node.getAttribute(attr);
+                                if (val && val.includes('userId=')) return val;
+                            }
+                            return null;
+                        }"""
+                    )
+                except Exception:
+                    href = None
+
+            if href:
+                c = _candidate_from_href(href, label_text or "Profiel bekijken")
+                if c:
+                    candidates.append(c)
+    except Exception:
+        pass
+
+    return _dedupe_and_store(candidates)
 
 
 def click_search_button_if_needed(page):
-    """Sommige TPV-resultaten verschijnen pas na expliciete klik op de zoekknop."""
     actions = [
         lambda: page.get_by_role("button", name="Zoek").first.click(timeout=2500),
         lambda: page.get_by_role("button", name="Search").first.click(timeout=2500),
@@ -174,13 +242,12 @@ def search_players(name_query: str, club: Optional[str] = None, sport: str = "Pa
 
             candidates = extract_candidates_from_page(page)
             if candidates:
-                log_line(f"Kandidaten direct via URL gevonden: {len(candidates)}")
+                log_line(f"Kandidaten direct zichtbaar: {len(candidates)}")
                 save_player_search_cache(name_query, club=club, sport=sport, candidates=candidates)
                 return candidates
 
             log_line("Nog geen kandidaten zichtbaar na URL-load, probeer expliciet op zoekknop te klikken...")
-            clicked = click_search_button_if_needed(page)
-            if clicked:
+            if click_search_button_if_needed(page):
                 if detect_robot_page(page):
                     raise RuntimeError("Robot-check gedetecteerd na zoektrigger")
                 candidates = extract_candidates_from_page(page)
