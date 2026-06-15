@@ -1,13 +1,14 @@
-PADELANALYSIS - PLUS BUNDLE V2
-=============================
+TPV URL SEARCH FIX
+==================
 
-Extra t.o.v. vorige versie:
-- Als je een naam ingeeft zonder lokale profielhit, probeert dashboard nu automatisch extern te zoeken.
-- Als exact 1 speler gevonden wordt:
-  - en data bestaat al in Firestore: die wordt meteen geladen
-  - en data bestaat nog niet: er start automatisch een scrape met zichtbare melding
-- Als meerdere externe hits gevonden worden: je kiest eerst de juiste kandidaat, daarna wordt bestaande data geladen of automatisch opgehaald.
+Wat is aangepast?
+- player_search.py gebruikt nu rechtstreeks de TPV zoek-URL met:
+  - playerName = achternaam
+  - playerFirstName = voornaam
+- dashboard.py gebruikt die verbeterde externe zoekstap automatisch bij naamzoeking
+- bestaande players-data wordt meteen geladen als player_id al in Firestore zit
+- nieuwe spelers worden automatisch opgehaald met zichtbare statusmelding
 
 Belangrijk:
-- Er is GEEN stealth / detectie-omzeiling ingebouwd.
-- Wel caching, incrementele updates en zichtbare statusmeldingen.
+- geen detectie-omzeiling / stealth
+- wel caching, incrementele updates en duidelijke statusmeldingen

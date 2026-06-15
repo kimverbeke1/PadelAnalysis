@@ -168,7 +168,7 @@ def resolve_player_id_from_name(name_query: str, club_query: Optional[str]) -> O
 
     with st.spinner('Geen lokale profielhit. Externe spelerzoekopdracht wordt uitgevoerd...'):
         try:
-            external_candidates = search_players(name_query.strip(), club=club_query or None, headless=True, use_cache=True)
+            external_candidates = search_players(name_query.strip(), club=club_query or None, headless=True, use_cache=False)
         except Exception as e:
             st.sidebar.warning(f'Externe zoekopdracht mislukt: {e}')
             return None
@@ -234,12 +234,12 @@ def pick_player_id() -> Optional[str]:
         return st.sidebar.text_input('Player ID', value='1790766').strip() or None
     name_query = st.sidebar.text_input('Zoek op naam', value='')
     club_query = st.sidebar.text_input('Club (optioneel)', value='')
-    st.sidebar.caption('Opmerking: automatische scrape gebruikt caching en incrementele updates. Geen stealth/omzeiling van sitebeveiliging.')
+    st.sidebar.caption('Automatische scrape gebruikt caching en incrementele updates. Geen detectie-omzeiling.')
     return resolve_player_id_from_name(name_query, club_query.strip() or None)
 
 
 st.title('🎾 Padel Dashboard Plus')
-st.caption('Zoek op naam, snellere incrementele scraper-architectuur en verbeterde UI')
+st.caption('Naamzoeking via juiste TPV-URL parameters: playerName=achternaam, playerFirstName=voornaam')
 player_id = pick_player_id()
 show_raw = st.sidebar.checkbox('Toon ruwe player data', value=False)
 show_debug_info = st.sidebar.checkbox('Toon debug-informatie', value=True)

@@ -1,7 +1,7 @@
 # 1) Ga naar je projectmap
 cd "C:\Users\verbekki\OneDrive - Spraying Systems Co\Private\PadelAnalysis"
 
-# 2) Pak PadelAnalysis_autosearch_bundle.zip uit in deze map en overschrijf bestaande files
+# 2) Pak PadelAnalysis_tpv_url_search_bundle.zip uit in deze map en overschrijf bestaande files
 
 # 3) Bekijk wijzigingen
 git status
@@ -10,10 +10,10 @@ git status
 git add .
 
 # 5) Commit
-git commit -m "Auto external lookup and auto scrape on name search"
+git commit -m "Fix TPV name search mapping and dashboard flow"
 
 # 6) Push
 git push
 
-# 7) Lokaal dashboard testen
+# 7) Lokaal testen
 py -m streamlit run dashboard.py
