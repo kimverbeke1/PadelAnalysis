@@ -1,19 +1,8 @@
-# 1) Ga naar je projectmap
 cd "C:\Users\verbekki\OneDrive - Spraying Systems Co\Private\PadelAnalysis"
+# Pak PadelAnalysis_tpv_click_fix.zip uit en overschrijf files
 
-# 2) Pak PadelAnalysis_tpv_url_search_bundle.zip uit in deze map en overschrijf bestaande files
-
-# 3) Bekijk wijzigingen
 git status
-
-# 4) Voeg alles toe
 git add .
-
-# 5) Commit
-git commit -m "Fix TPV name search mapping and dashboard flow"
-
-# 6) Push
+git commit -m "Fix TPV search requires click"
 git push
-
-# 7) Lokaal testen
 py -m streamlit run dashboard.py

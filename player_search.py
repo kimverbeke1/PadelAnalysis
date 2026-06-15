@@ -40,15 +40,14 @@ def split_name_for_tpv(name_query: str):
     return first_name, last_name
 
 
-def build_search_url(name_query: str, club: Optional[str] = None, sport_id: int = 2) -> str:
+def build_search_url(name_query: str, sport_id: int = 2) -> str:
     first_name, last_name = split_name_for_tpv(name_query)
-    url = (
+    return (
         f"{BASE_SEARCH_URL}?sportId={sport_id}"
         f"&playerName={quote(last_name)}"
         f"&playerFirstName={quote(first_name)}"
         f"#searchResultStart"
     )
-    return url
 
 
 def dismiss_cookie_banner_if_present(page):
@@ -58,6 +57,7 @@ def dismiss_cookie_banner_if_present(page):
             if loc.count() > 0:
                 loc.first.click(timeout=2000)
                 page.wait_for_timeout(800)
+                log_line(f"Cookie banner gesloten via: {label}")
                 return
         except Exception:
             pass
@@ -123,16 +123,42 @@ def extract_candidates_from_page(page) -> List[Dict]:
     return unique
 
 
+def click_search_button_if_needed(page):
+    """Sommige TPV-resultaten verschijnen pas na expliciete klik op de zoekknop."""
+    actions = [
+        lambda: page.get_by_role("button", name="Zoek").first.click(timeout=2500),
+        lambda: page.get_by_role("button", name="Search").first.click(timeout=2500),
+        lambda: page.locator("button[type='submit']").first.click(timeout=2500),
+        lambda: page.get_by_text("Zoek", exact=True).click(timeout=2500),
+    ]
+    for idx, action in enumerate(actions, start=1):
+        try:
+            action()
+            page.wait_for_timeout(2500)
+            log_line(f"Zoekknop geklikt via methode {idx}")
+            return True
+        except Exception:
+            continue
+    try:
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(2500)
+        log_line("Zoektrigger via Enter")
+        return True
+    except Exception:
+        return False
+
+
 def search_players(name_query: str, club: Optional[str] = None, sport: str = "Padel", headless: bool = True, use_cache: bool = True) -> List[Dict]:
     if use_cache:
         cached = get_player_search_cache(name_query, club=club, sport=sport)
         if cached and isinstance(cached.get("candidates"), list) and cached.get("candidates"):
+            log_line(f"Cache gebruikt voor zoekterm: {name_query}")
             return cached.get("candidates", [])
 
     if SEARCH_LOG_FILE.exists():
         SEARCH_LOG_FILE.unlink()
 
-    url = build_search_url(name_query=name_query, club=club, sport_id=2)
+    url = build_search_url(name_query=name_query, sport_id=2)
     log_line(f"Zoek-URL: {url}")
 
     with sync_playwright() as p:
@@ -145,10 +171,26 @@ def search_players(name_query: str, club: Optional[str] = None, sport: str = "Pa
             dismiss_cookie_banner_if_present(page)
             if detect_robot_page(page):
                 raise RuntimeError("Robot-check gedetecteerd op zoekpagina")
+
             candidates = extract_candidates_from_page(page)
             if candidates:
+                log_line(f"Kandidaten direct via URL gevonden: {len(candidates)}")
                 save_player_search_cache(name_query, club=club, sport=sport, candidates=candidates)
-            return candidates
+                return candidates
+
+            log_line("Nog geen kandidaten zichtbaar na URL-load, probeer expliciet op zoekknop te klikken...")
+            clicked = click_search_button_if_needed(page)
+            if clicked:
+                if detect_robot_page(page):
+                    raise RuntimeError("Robot-check gedetecteerd na zoektrigger")
+                candidates = extract_candidates_from_page(page)
+                if candidates:
+                    log_line(f"Kandidaten gevonden na expliciete zoektrigger: {len(candidates)}")
+                    save_player_search_cache(name_query, club=club, sport=sport, candidates=candidates)
+                    return candidates
+
+            log_line("Geen kandidaten gevonden")
+            return []
         finally:
             context.close()
             browser.close()
