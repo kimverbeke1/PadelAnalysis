@@ -8,6 +8,7 @@ from firebase_admin import credentials, firestore
 SERVICE_ACCOUNT_FILE = "firebase-key.json"
 PLAYERS_COLLECTION = "players"
 PLAYER_SEARCH_CACHE_COLLECTION = "player_search_cache"
+PLAYER_PROFILES_COLLECTION = "player_profiles"
 
 
 def utc_now_iso() -> str:
@@ -17,53 +18,51 @@ def utc_now_iso() -> str:
 def convert_firestore_values(obj: Any):
     if isinstance(obj, dict):
         return {k: convert_firestore_values(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         return [convert_firestore_values(v) for v in obj]
-    elif hasattr(obj, "isoformat"):
+    if hasattr(obj, "isoformat"):
         try:
             return obj.isoformat()
         except Exception:
             return str(obj)
-    else:
-        return obj
+    return obj
 
 
 def sanitize_for_firestore(obj: Any):
     if isinstance(obj, dict):
         return {str(k): sanitize_for_firestore(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         return [sanitize_for_firestore(v) for v in obj]
-    elif isinstance(obj, tuple):
+    if isinstance(obj, tuple):
         return [sanitize_for_firestore(v) for v in obj]
-    elif hasattr(obj, "isoformat"):
+    if hasattr(obj, "isoformat"):
         try:
             return obj.isoformat()
         except Exception:
             return str(obj)
-    else:
-        return obj
+    return obj
+
+
+def normalize_name(name: str) -> str:
+    return " ".join((name or "").lower().split()).strip()
+
+
+def normalize_search_key(name_query: str, club: Optional[str] = None, sport: str = "Padel") -> str:
+    return f"{(sport or '').strip().lower()}|{normalize_name(name_query)}|{normalize_name(club or '')}"
 
 
 def build_minimal_defaults(player_id: str, player_data: dict) -> dict:
-    if not isinstance(player_data, dict):
-        raise ValueError("player_data moet een dictionary zijn")
-
-    data = dict(player_data)
+    data = dict(player_data or {})
     data.setdefault("player_id", str(player_id))
     data.setdefault("last_updated", utc_now_iso())
     data.setdefault("stats", {})
     data.setdefault("raw_data", {})
-
     raw = dict(data.get("raw_data", {}))
     raw.setdefault("player_id", str(player_id))
     raw.setdefault("timestamp", utc_now_iso())
     raw.setdefault("matches", [])
-    if isinstance(raw.get("matches", []), list):
-        raw.setdefault("matches_count", len(raw.get("matches", [])))
-    else:
-        raw.setdefault("matches_count", 0)
+    raw.setdefault("matches_count", len(raw.get("matches", [])) if isinstance(raw.get("matches", []), list) else 0)
     data["raw_data"] = raw
-
     stats = dict(data.get("stats", {}))
     stats.setdefault("matches", raw.get("matches_count", 0))
     stats.setdefault("wins", 0)
@@ -71,15 +70,7 @@ def build_minimal_defaults(player_id: str, player_data: dict) -> dict:
     stats.setdefault("unknown_results", 0)
     stats.setdefault("winrate", 0.0)
     data["stats"] = stats
-
     return data
-
-
-def normalize_search_key(name_query: str, club: Optional[str] = None, sport: str = "Padel") -> str:
-    name_query = (name_query or "").strip().lower()
-    club = (club or "").strip().lower()
-    sport = (sport or "").strip().lower()
-    return f"{sport}|{name_query}|{club}"
 
 
 def _load_streamlit_secrets_credentials() -> Optional[credentials.Certificate]:
@@ -89,7 +80,8 @@ def _load_streamlit_secrets_credentials() -> Optional[credentials.Certificate]:
             return None
         firebase_cfg = dict(st.secrets["firebase"])
         if "private_key" in firebase_cfg:
-            firebase_cfg["private_key"] = str(firebase_cfg["private_key"]).replace("\\n", "\n")
+            firebase_cfg["private_key"] = str(firebase_cfg["private_key"]).replace("\n", "
+")
         return credentials.Certificate(firebase_cfg)
     except Exception:
         return None
@@ -104,17 +96,9 @@ def _load_local_file_credentials() -> Optional[credentials.Certificate]:
 def _init_firebase():
     if firebase_admin._apps:
         return firestore.client()
-
-    cred = _load_streamlit_secrets_credentials()
+    cred = _load_streamlit_secrets_credentials() or _load_local_file_credentials()
     if cred is None:
-        cred = _load_local_file_credentials()
-
-    if cred is None:
-        raise FileNotFoundError(
-            "Geen Firebase credentials gevonden. Voeg voor lokale runs een 'firebase-key.json' toe, "
-            "of configureer Streamlit secrets met een [firebase]-blok."
-        )
-
+        raise FileNotFoundError("Geen Firebase credentials gevonden. Gebruik lokaal firebase-key.json of Streamlit secrets met [firebase].")
     firebase_admin.initialize_app(cred)
     return firestore.client()
 
@@ -123,10 +107,9 @@ db = _init_firebase()
 
 
 def save_player(player_id: str, player_data: dict):
-    prepared = build_minimal_defaults(player_id, player_data)
-    clean_doc = sanitize_for_firestore(prepared)
-    db.collection(PLAYERS_COLLECTION).document(str(player_id)).set(clean_doc, merge=False)
-    return clean_doc
+    prepared = sanitize_for_firestore(build_minimal_defaults(player_id, player_data))
+    db.collection(PLAYERS_COLLECTION).document(str(player_id)).set(prepared, merge=False)
+    return prepared
 
 
 def get_player(player_id: str, converted: bool = True):
@@ -137,31 +120,50 @@ def get_player(player_id: str, converted: bool = True):
     return convert_firestore_values(data) if converted else data
 
 
-def player_exists(player_id: str) -> bool:
-    return db.collection(PLAYERS_COLLECTION).document(str(player_id)).get().exists
+def save_player_profile(player_id: str, display_name: Optional[str] = None, club: Optional[str] = None, sport: str = "Padel", dashboard_url: Optional[str] = None, aliases: Optional[List[str]] = None):
+    doc = {
+        "player_id": str(player_id),
+        "display_name": display_name,
+        "display_name_normalized": normalize_name(display_name or ""),
+        "club": club,
+        "club_normalized": normalize_name(club or ""),
+        "sport": sport,
+        "dashboard_url": dashboard_url,
+        "aliases": aliases or [],
+        "aliases_normalized": [normalize_name(a) for a in (aliases or []) if a],
+        "last_updated": utc_now_iso(),
+    }
+    db.collection(PLAYER_PROFILES_COLLECTION).document(str(player_id)).set(sanitize_for_firestore(doc), merge=True)
+    return doc
 
 
-def delete_player(player_id: str):
-    db.collection(PLAYERS_COLLECTION).document(str(player_id)).delete()
-    return True
+def get_player_profile(player_id: str, converted: bool = True):
+    doc = db.collection(PLAYER_PROFILES_COLLECTION).document(str(player_id)).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict()
+    return convert_firestore_values(data) if converted else data
 
 
-def reset_player(player_id: str):
-    delete_player(player_id)
-    print(f"Player {player_id} verwijderd uit Firestore.")
-
-
-def get_all_players(converted: bool = True):
-    docs = db.collection(PLAYERS_COLLECTION).stream()
-    result = []
+def search_player_profiles(name_query: str, club: Optional[str] = None, limit: int = 20, converted: bool = True):
+    name_q = normalize_name(name_query)
+    club_q = normalize_name(club or "")
+    docs = db.collection(PLAYER_PROFILES_COLLECTION).stream()
+    out = []
     for doc in docs:
-        data = doc.to_dict()
-        result.append(convert_firestore_values(data) if converted else data)
-    return result
+        data = doc.to_dict() or {}
+        names = [data.get("display_name_normalized", "")] + (data.get("aliases_normalized", []) or [])
+        clubs = data.get("club_normalized", "")
+        name_match = (not name_q) or any(name_q in n for n in names)
+        club_match = (not club_q) or (club_q in clubs)
+        if name_match and club_match:
+            out.append(convert_firestore_values(data) if converted else data)
+    out = sorted(out, key=lambda x: (x.get("display_name") or x.get("player_id") or ""))
+    return out[:limit]
 
 
 def save_player_search_cache(name_query: str, club: Optional[str], sport: str, candidates: List[Dict[str, Any]]):
-    key = normalize_search_key(name_query, club=club, sport=sport)
+    key = normalize_search_key(name_query, club, sport)
     doc = {
         "search_key": key,
         "name_query": name_query,
@@ -176,7 +178,7 @@ def save_player_search_cache(name_query: str, club: Optional[str], sport: str, c
 
 
 def get_player_search_cache(name_query: str, club: Optional[str] = None, sport: str = "Padel", converted: bool = True):
-    key = normalize_search_key(name_query, club=club, sport=sport)
+    key = normalize_search_key(name_query, club, sport)
     doc = db.collection(PLAYER_SEARCH_CACHE_COLLECTION).document(key).get()
     if not doc.exists:
         return None
