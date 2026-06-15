@@ -1,21 +1,13 @@
-PADELANALYSIS - PLUS BUNDLE
-==========================
+PADELANALYSIS - PLUS BUNDLE V2
+=============================
 
-Wat zit in deze versie?
-- Zoek op naam in dashboard (op basis van player_profiles in Firestore)
-- Snellere scraper dankzij incrementele updates
-- Betere UI met extra filters, trends en samenvattingen
+Extra t.o.v. vorige versie:
+- Als je een naam ingeeft zonder lokale profielhit, probeert dashboard nu automatisch extern te zoeken.
+- Als exact 1 speler gevonden wordt:
+  - en data bestaat al in Firestore: die wordt meteen geladen
+  - en data bestaat nog niet: er start automatisch een scrape met zichtbare melding
+- Als meerdere externe hits gevonden worden: je kiest eerst de juiste kandidaat, daarna wordt bestaande data geladen of automatisch opgehaald.
 
 Belangrijk:
-- Dashboard gebruikt root firebase_service.py
-- scraper/__init__.py heeft GEEN side effects
-- scraper/firebase_service.py is enkel een shim naar root firebase_service.py
-
-Lokale scraper setup:
-- py -m pip install -r requirements.txt
-- py -m playwright install chromium
-
-Cloud / Streamlit:
-- Dashboard werkt publiek met Firestore-data
-- Live Playwright scraping is vooral bedoeld voor lokaal/admin gebruik
-- Zet Firebase secrets in Streamlit under App settings > Secrets
+- Er is GEEN stealth / detectie-omzeiling ingebouwd.
+- Wel caching, incrementele updates en zichtbare statusmeldingen.

@@ -5,7 +5,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from firebase_service import get_player, get_player_profile, search_player_profiles
+from firebase_service import get_player, get_player_profile, save_player_profile, search_player_profiles
+from player_search import search_players
+from scraper.scraper import scrape_player
 
 st.set_page_config(page_title="Padel Dashboard", page_icon="🎾", layout="wide")
 
@@ -146,6 +148,85 @@ def render_metric_row(match_count: int, wins: int, losses: int, unknown: int, wi
     c6.metric('Periodes', periods)
 
 
+def resolve_player_id_from_name(name_query: str, club_query: Optional[str]) -> Optional[str]:
+    local_candidates = search_player_profiles(name_query.strip(), club=club_query or None, limit=20) if name_query.strip() else []
+    if local_candidates:
+        labels = []
+        mapping = {}
+        for c in local_candidates:
+            label = c.get('display_name') or c.get('player_id')
+            if c.get('club'):
+                label = f"{label} — {c['club']}"
+            label = f"{label} [{c.get('player_id')}]"
+            labels.append(label)
+            mapping[label] = c.get('player_id')
+        chosen = st.sidebar.selectbox('Lokale profielhits', labels)
+        return mapping.get(chosen)
+
+    if not name_query.strip():
+        return None
+
+    with st.spinner('Geen lokale profielhit. Externe spelerzoekopdracht wordt uitgevoerd...'):
+        try:
+            external_candidates = search_players(name_query.strip(), club=club_query or None, headless=True, use_cache=True)
+        except Exception as e:
+            st.sidebar.warning(f'Externe zoekopdracht mislukt: {e}')
+            return None
+
+    if not external_candidates:
+        st.sidebar.info('Geen speler gevonden op externe zoekopdracht.')
+        return None
+
+    if len(external_candidates) == 1:
+        candidate = external_candidates[0]
+        player_id = str(candidate.get('player_id')) if candidate.get('player_id') else None
+        if not player_id:
+            st.sidebar.warning('Externe hit had geen player_id.')
+            return None
+        save_player_profile(player_id, candidate.get('display_name'), candidate.get('club'), dashboard_url=candidate.get('dashboard_url'), aliases=[candidate.get('display_name')] if candidate.get('display_name') else [])
+        existing = get_player(player_id)
+        if existing:
+            st.sidebar.success('Profiel gevonden en bestaande data geladen.')
+            return player_id
+        with st.spinner('Nieuwe speler gevonden. Resultaten worden nu opgehaald en opgeslagen...'):
+            try:
+                scrape_player(player_id, headless=True, force_full_refresh=False, refresh_recent_periods=2)
+                st.sidebar.success('Nieuwe speler automatisch opgehaald.')
+                return player_id
+            except Exception as e:
+                st.sidebar.warning(f'Automatisch ophalen mislukt: {e}')
+                return None
+
+    labels = []
+    mapping = {}
+    for c in external_candidates:
+        label = c.get('display_name') or c.get('player_id')
+        if c.get('club'):
+            label = f"{label} — {c['club']}"
+        label = f"{label} [{c.get('player_id')}]"
+        labels.append(label)
+        mapping[label] = c
+    chosen_label = st.sidebar.selectbox('Externe hits', labels)
+    chosen = mapping.get(chosen_label)
+    if not chosen:
+        return None
+    player_id = str(chosen.get('player_id')) if chosen.get('player_id') else None
+    if not player_id:
+        return None
+    save_player_profile(player_id, chosen.get('display_name'), chosen.get('club'), dashboard_url=chosen.get('dashboard_url'), aliases=[chosen.get('display_name')] if chosen.get('display_name') else [])
+    existing = get_player(player_id)
+    if existing:
+        return player_id
+    with st.spinner('Geselecteerde speler wordt nu automatisch opgehaald...'):
+        try:
+            scrape_player(player_id, headless=True, force_full_refresh=False, refresh_recent_periods=2)
+            st.sidebar.success('Nieuwe speler automatisch opgehaald.')
+            return player_id
+        except Exception as e:
+            st.sidebar.warning(f'Automatisch ophalen mislukt: {e}')
+            return None
+
+
 def pick_player_id() -> Optional[str]:
     st.sidebar.header('Speler kiezen')
     mode = st.sidebar.radio('Selectiemethode', ['Player ID', 'Naam'], horizontal=True)
@@ -153,20 +234,8 @@ def pick_player_id() -> Optional[str]:
         return st.sidebar.text_input('Player ID', value='1790766').strip() or None
     name_query = st.sidebar.text_input('Zoek op naam', value='')
     club_query = st.sidebar.text_input('Club (optioneel)', value='')
-    candidates = search_player_profiles(name_query.strip(), club=club_query.strip() or None, limit=20) if name_query.strip() else []
-    if not candidates:
-        st.sidebar.info('Geen lokale profielhits. Bouw eerst profielen op via lokaal/admin gebruik van de scraper op naam.')
-        return None
-    labels = []
-    mapping = {}
-    for c in candidates:
-        label = c.get('display_name') or c.get('player_id')
-        if c.get('club'):
-            label = f"{label} — {c['club']}"
-        label = f"{label} [{c.get('player_id')}]"
-        labels.append(label)
-        mapping[label] = c.get('player_id')
-    return mapping.get(st.sidebar.selectbox('Gevonden spelers', labels))
+    st.sidebar.caption('Opmerking: automatische scrape gebruikt caching en incrementele updates. Geen stealth/omzeiling van sitebeveiliging.')
+    return resolve_player_id_from_name(name_query, club_query.strip() or None)
 
 
 st.title('🎾 Padel Dashboard Plus')
