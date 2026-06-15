@@ -80,16 +80,21 @@ def _load_streamlit_secrets_credentials() -> Optional[credentials.Certificate]:
             return None
         firebase_cfg = dict(st.secrets["firebase"])
         if "private_key" in firebase_cfg:
-            firebase_cfg["private_key"] = str(firebase_cfg["private_key"]).replace("\n", "
-")
+            firebase_cfg["private_key"] = str(firebase_cfg["private_key"]).replace("\\n", "\n")
         return credentials.Certificate(firebase_cfg)
     except Exception:
         return None
 
 
 def _load_local_file_credentials() -> Optional[credentials.Certificate]:
-    if os.path.exists(SERVICE_ACCOUNT_FILE):
-        return credentials.Certificate(SERVICE_ACCOUNT_FILE)
+    candidate_paths = [
+        SERVICE_ACCOUNT_FILE,
+        os.path.join(os.path.dirname(__file__), SERVICE_ACCOUNT_FILE),
+        os.path.join(os.path.dirname(__file__), "scraper", SERVICE_ACCOUNT_FILE),
+    ]
+    for candidate in candidate_paths:
+        if os.path.exists(candidate):
+            return credentials.Certificate(candidate)
     return None
 
 

@@ -1,4 +1,4 @@
-from scraper import scrape_player, find_player_and_scrape
+from scraper.scraper import scrape_player, find_player_and_scrape
 from scraper.firebase_service import get_player
 
 # =========================================================
