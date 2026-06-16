@@ -15,9 +15,24 @@ DEBUG_DIR = Path("debug_output")
 DEBUG_DIR.mkdir(exist_ok=True)
 NETWORK_LOG_JSONL = DEBUG_DIR / "network_log.jsonl"
 SCRAPER_LOG_TXT = DEBUG_DIR / "scraper_debug.log"
+LAST_HTML_FILE = DEBUG_DIR / "last_page.html"
+LAST_SCREENSHOT_FILE = DEBUG_DIR / "last_page.png"
 
 SURNAME_PARTICLES = {"de", "den", "der", "van", "vanden", "vander", "ten", "ter", "op", "te", "du", "del", "della", "la", "le"}
 SURNAME_PARTICLE_SEQUENCES = {("van", "de"), ("van", "den"), ("van", "der"), ("de", "la")}
+
+
+def log_line(message: str):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] {message}"
+    print(line)
+    with open(SCRAPER_LOG_TXT, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def append_jsonl(path: Path, obj: dict):
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
 def utc_now_iso():
@@ -28,28 +43,59 @@ def clean_text(text: str) -> str:
     return " ".join(str(text or "").split()).strip()
 
 
-def log_line(message: str):
-    line = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}"
-    print(line)
-    with open(SCRAPER_LOG_TXT, 'a', encoding='utf-8') as f:
-        f.write(line + "\n")
+def save_debug_snapshot(page, prefix="snapshot"):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    html_path = DEBUG_DIR / f"{prefix}_{timestamp}.html"
+    png_path = DEBUG_DIR / f"{prefix}_{timestamp}.png"
+    try:
+        html_path.write_text(page.content(), encoding="utf-8")
+        page.screenshot(path=str(png_path), full_page=True)
+    except Exception:
+        pass
 
 
-def append_jsonl(path: Path, obj: dict):
-    with open(path, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+def attach_network_logging(page):
+    def on_request(req):
+        try:
+            if req.resource_type in ("xhr", "fetch"):
+                append_jsonl(NETWORK_LOG_JSONL, {
+                    "type": "request",
+                    "timestamp": utc_now_iso(),
+                    "method": req.method,
+                    "url": req.url,
+                    "resource_type": req.resource_type,
+                })
+        except Exception:
+            pass
+
+    def on_response(res):
+        try:
+            req = res.request
+            if req.resource_type in ("xhr", "fetch"):
+                append_jsonl(NETWORK_LOG_JSONL, {
+                    "type": "response",
+                    "timestamp": utc_now_iso(),
+                    "status": res.status,
+                    "url": res.url,
+                    "resource_type": req.resource_type,
+                })
+        except Exception:
+            pass
+
+    page.on("request", on_request)
+    page.on("response", on_response)
 
 
 def detect_robot_page(page) -> bool:
     try:
-        text = page.locator('body').inner_text(timeout=3000).lower()
-        return 'ben jij een robot?' in text or 'verhoogd aantal geautomatiseerde toegangspogingen' in text
+        text = page.locator("body").inner_text(timeout=3000).lower()
+        return "ben jij een robot?" in text or "verhoogd aantal geautomatiseerde toegangspogingen" in text
     except Exception:
         return False
 
 
 def dismiss_cookie_banner_if_present(page):
-    for txt in ['Alle cookies accepteren', 'Cookies accepteren', 'Ik ga akkoord', 'Accepteren']:
+    for txt in ["Alle cookies accepteren", "Cookies accepteren", "Ik ga akkoord", "Accepteren"]:
         try:
             locator = page.get_by_text(txt, exact=False)
             if locator.count() > 0:
@@ -60,112 +106,126 @@ def dismiss_cookie_banner_if_present(page):
             pass
 
 
-def attach_network_logging(page):
-    def on_request(req):
-        if req.resource_type in ('xhr', 'fetch'):
-            append_jsonl(NETWORK_LOG_JSONL, {
-                'type': 'request', 'timestamp': utc_now_iso(), 'method': req.method,
-                'url': req.url, 'resource_type': req.resource_type,
-            })
-    def on_response(res):
-        req = res.request
-        if req.resource_type in ('xhr', 'fetch'):
-            append_jsonl(NETWORK_LOG_JSONL, {
-                'type': 'response', 'timestamp': utc_now_iso(), 'status': res.status,
-                'url': res.url, 'resource_type': req.resource_type,
-            })
-    page.on('request', on_request)
-    page.on('response', on_response)
-
-
 def open_dashboard(page, player_id: str):
     url = BASE_URL.format(player_id=player_id)
-    page.goto(url, wait_until='domcontentloaded', timeout=60000)
-    page.wait_for_timeout(2500)
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(3500)
     dismiss_cookie_banner_if_present(page)
     if detect_robot_page(page):
-        raise RuntimeError('Robot-check gedetecteerd')
+        save_debug_snapshot(page, prefix="robot_page")
+        raise RuntimeError("Robot-check gedetecteerd.")
     return url
 
 
 def try_activate_padel_tab(page):
-    for action in [
-        lambda: page.get_by_role('tab', name=re.compile(r'^Padel$', re.I)).click(timeout=3000),
-        lambda: page.get_by_role('button', name=re.compile(r'^Padel$', re.I)).click(timeout=3000),
-        lambda: page.get_by_role('link', name=re.compile(r'^Padel$', re.I)).click(timeout=3000),
-        lambda: page.get_by_text('Padel', exact=True).click(timeout=3000),
-    ]:
+    actions = [
+        lambda: page.get_by_role("tab", name=re.compile(r"^Padel$", re.I)).click(timeout=3000),
+        lambda: page.get_by_role("button", name=re.compile(r"^Padel$", re.I)).click(timeout=3000),
+        lambda: page.get_by_role("link", name=re.compile(r"^Padel$", re.I)).click(timeout=3000),
+        lambda: page.get_by_text("Padel", exact=True).click(timeout=3000),
+    ]
+    for action in actions:
         try:
-            action(); page.wait_for_timeout(1500); return True
+            action()
+            page.wait_for_timeout(2000)
+            return True
         except Exception:
-            pass
+            continue
     return False
 
 
 def get_select_options_from_select(page):
     candidates = []
-    selects = page.locator('select')
-    for i in range(selects.count()):
-        sel = selects.nth(i)
-        try:
-            visible = sel.is_visible()
-        except Exception:
-            visible = False
-        options = sel.locator('option')
-        names, values = [], []
-        for j in range(options.count()):
+    try:
+        selects = page.locator("select")
+        count = selects.count()
+        for i in range(count):
+            sel = selects.nth(i)
             try:
-                txt = clean_text(options.nth(j).inner_text())
-                val = options.nth(j).get_attribute('value')
+                visible = sel.is_visible()
             except Exception:
-                continue
-            if txt:
-                names.append(txt); values.append(val)
-        period_like = [n for n in names if 'resultaten van week' in n.lower()]
-        if len(period_like) >= 2:
-            candidates.append({'mode': 'select', 'index': i, 'visible': visible, 'options': [{'label': n, 'value': v} for n, v in zip(names, values)]})
+                visible = False
+            options = sel.locator("option")
+            names = []
+            values = []
+            for j in range(options.count()):
+                try:
+                    text = clean_text(options.nth(j).inner_text())
+                    value = options.nth(j).get_attribute("value")
+                except Exception:
+                    continue
+                if text:
+                    names.append(text)
+                    values.append(value)
+            period_like = [n for n in names if "resultaten van week" in n.lower()]
+            if len(period_like) >= 2:
+                candidates.append({
+                    "mode": "select",
+                    "index": i,
+                    "visible": visible,
+                    "options": [{"label": n, "value": v} for n, v in zip(names, values)],
+                })
+    except Exception:
+        return None
     if not candidates:
         return None
-    return sorted(candidates, key=lambda c: (100 if c.get('visible') else 0), reverse=True)[0]
+    return sorted(candidates, key=lambda c: (100 if c.get("visible") else 0), reverse=True)[0]
 
 
 def wait_for_results_state(page, timeout_ms: int = 12000):
     start = time.time()
+    empty_patterns = ["geen uitslagen beschikbaar", "geen resultaten beschikbaar"]
     while (time.time() - start) * 1000 < timeout_ms:
         try:
-            if page.locator('table').count() > 0:
-                return True
+            if page.locator("table").count() > 0:
+                return "tables"
+        except Exception:
+            pass
+        try:
+            body = clean_text(page.locator("body").inner_text(timeout=600)).lower()
+            if any(p in body for p in empty_patterns):
+                return "empty"
         except Exception:
             pass
         page.wait_for_timeout(300)
-    return False
+    return "timeout"
 
 
 def select_period(page, selector_info, option):
-    if selector_info['mode'] != 'select':
-        return False
-    sel = page.locator('select').nth(selector_info['index'])
-    try:
-        if option.get('value') is not None:
-            sel.select_option(value=option['value'], timeout=5000)
-        else:
-            sel.select_option(label=option['label'], timeout=5000)
-        return wait_for_results_state(page)
-    except Exception:
-        return False
+    if selector_info["mode"] != "select":
+        return False, "no_selector"
+    sel = page.locator("select").nth(selector_info["index"])
+    attempts = []
+    for attempt in range(2):
+        try:
+            if option.get("value") is not None:
+                sel.select_option(value=option["value"], timeout=5000)
+            else:
+                sel.select_option(label=option["label"], timeout=5000)
+            state = wait_for_results_state(page)
+            attempts.append(state)
+            if state in ("tables", "empty"):
+                return True, state
+        except Exception:
+            attempts.append("exception")
+        page.wait_for_timeout(1000)
+    return False, ",".join(attempts)
 
 
 def determine_periods_to_scrape(all_options: List[Dict], existing_player: Optional[Dict], refresh_recent_periods: int = 2, force_full_refresh: bool = False) -> List[Dict]:
     if force_full_refresh or not existing_player:
         return all_options
-    raw = existing_player.get('raw_data', {}) if isinstance(existing_player, dict) else {}
-    already_processed = set(raw.get('periods_processed', []) or [])
+    raw = existing_player.get("raw_data", {}) if isinstance(existing_player, dict) else {}
+    already_processed = set(raw.get("periods_processed", []) or [])
     recent = all_options[:refresh_recent_periods]
-    not_yet = [o for o in all_options[refresh_recent_periods:] if o.get('label') not in already_processed]
-    seen, out = set(), []
+    not_yet = [o for o in all_options[refresh_recent_periods:] if o.get("label") not in already_processed]
+    out = []
+    seen = set()
     for opt in recent + not_yet:
-        if opt['label'] not in seen:
-            seen.add(opt['label']); out.append(opt)
+        label = opt.get("label")
+        if label not in seen:
+            seen.add(label)
+            out.append(opt)
     return out
 
 
@@ -250,7 +310,10 @@ def parse_row_structured(row_text: str) -> Dict[str, Optional[str]]:
 
 def collect_structured_rows(page, current_period: str) -> List[Dict]:
     out = []
-    if not wait_for_results_state(page):
+    state = wait_for_results_state(page)
+    if state == "empty":
+        return out
+    if state == "timeout":
         return out
     try:
         page.wait_for_selector('table', state='attached', timeout=5000)
@@ -301,10 +364,11 @@ def merge_incremental_data(existing_player: Optional[Dict], new_matches: List[Di
         'player_id': existing_player.get('player_id') if existing_player else None,
         'timestamp': now_iso,
         'matches_count': len(combined_matches),
-        'schema_version': 'v5_plus_incremental_structured_matches',
+        'schema_version': 'v6_user-add-page_incremental',
         'periods_processed': list(dict.fromkeys(periods_processed_now + (existing_raw.get('periods_processed', []) or []))),
         'empty_periods': list(dict.fromkeys(empty_periods_now + (existing_raw.get('empty_periods', []) or []))),
-        'failed_periods': list(dict.fromkeys(failed_periods_now + (existing_raw.get('failed_periods', []) or []))),
+        # important: do NOT accumulate failed periods forever; only show current run failures
+        'failed_periods': failed_periods_now,
         'network_log_file': str(NETWORK_LOG_JSONL),
         'debug_log_file': str(SCRAPER_LOG_TXT),
         'matches': combined_matches,
@@ -332,8 +396,12 @@ def scrape_player(player_id: str, headless: bool = True, max_periods=None, force
             try_activate_padel_tab(page)
             selector_info = get_select_options_from_select(page)
             if not selector_info:
+                period_matches = collect_structured_rows(page, 'HUIDIGE_PERIODE')
+                if period_matches:
+                    new_matches.extend(period_matches)
+                else:
+                    empty_periods_now.append('HUIDIGE_PERIODE')
                 processed_periods_now.append('HUIDIGE_PERIODE')
-                new_matches.extend(collect_structured_rows(page, 'HUIDIGE_PERIODE'))
             else:
                 options = [o for o in selector_info['options'] if 'resultaten van week' in o['label'].lower()]
                 if max_periods is not None:
@@ -341,8 +409,10 @@ def scrape_player(player_id: str, headless: bool = True, max_periods=None, force
                 options_to_scrape = determine_periods_to_scrape(options, existing_player, refresh_recent_periods, force_full_refresh)
                 for opt in options_to_scrape:
                     label = opt['label']
-                    if not select_period(page, selector_info, opt):
+                    ok, result_state = select_period(page, selector_info, opt)
+                    if not ok:
                         failed_periods_now.append(label)
+                        log_line(f"Periode mislukt: {label} | state={result_state}")
                         continue
                     period_matches = collect_structured_rows(page, label)
                     if period_matches:
@@ -356,17 +426,22 @@ def scrape_player(player_id: str, headless: bool = True, max_periods=None, force
             save_player(player_id, final_doc)
             return {'player_id': str(player_id), **final_doc}
         finally:
+            try:
+                LAST_HTML_FILE.write_text(page.content(), encoding='utf-8')
+                page.screenshot(path=str(LAST_SCREENSHOT_FILE), full_page=True)
+            except Exception:
+                pass
             context.close(); browser.close()
 
 
-def find_player_and_scrape(name_query: str, club: Optional[str] = None, sport: str = 'Padel', headless: bool = True, force_full_refresh: bool = False, refresh_recent_periods: int = 2):
-    candidates = search_players(name_query=name_query, club=club, sport=sport, headless=headless, use_cache=True)
+def find_player_and_scrape(full_name: Optional[str] = None, club: Optional[str] = None, sport: str = 'Padel', headless: bool = True, force_full_refresh: bool = False, refresh_recent_periods: int = 2, first_name: Optional[str] = None, last_name: Optional[str] = None):
+    candidates = search_players(full_name=full_name, first_name=first_name, last_name=last_name, club=club, sport=sport, headless=headless, use_cache=True)
     if not candidates:
-        raise RuntimeError(f'Geen spelers gevonden voor query: {name_query}')
+        raise RuntimeError(f'Geen spelers gevonden voor query')
     chosen = candidates[0]
     player_id = chosen.get('player_id')
     if not player_id:
-        raise RuntimeError(f'Geen player_id gevonden in eerste kandidaat voor query: {name_query}')
+        raise RuntimeError('Geen player_id gevonden in eerste kandidaat')
     if chosen.get('display_name') or chosen.get('club'):
         save_player_profile(str(player_id), chosen.get('display_name'), chosen.get('club'), dashboard_url=chosen.get('dashboard_url'), aliases=[chosen.get('display_name')] if chosen.get('display_name') else [])
     result = scrape_player(str(player_id), headless=headless, force_full_refresh=force_full_refresh, refresh_recent_periods=refresh_recent_periods)

@@ -1,6 +1,11 @@
-TPV PROFILE BUTTON FIX
-=======================
+PADELANALYSIS - V2 NAME + ADD USER IMPROVEMENTS
+==============================================
 
-Extra fix:
-- player_search.py leest nu ook expliciet controls/knoppen met tekst "Profiel bekijken" uit.
-- Daardoor kan de speler-ID gevonden worden, ook als TPV geen gewone dashboard-link toont maar een profielknop/anker gebruikt.
+Aangepast:
+- naamprobleem opgelost in player_search.py:
+  - echte naam wordt nu uit de resultaatcontainer gehaald
+  - 'Profiel bekijken' wordt niet meer als display_name opgeslagen
+- dashboard heeft nu een echte knop 'Zoek speler' i.p.v. impliciete zoeking bij Enter
+- voornaam en achternaam zijn aparte velden op dashboard en op 'Gebruiker toevoegen'
+- op 'Gebruiker toevoegen' wordt club getoond bij kandidaten
+- scraper toont enkel mislukte periodes van de laatste run, en probeert periode-selecties opnieuw
