@@ -1,8 +1,12 @@
-PADELANALYSIS - UI CLEANUP
-========================
+PADELANALYSIS - V-CLEAN FINAL UI
+================================
 
-Aangepast op vraag:
-- 'Manueel toevoegen' is verwijderd
-- ID staat alleen nog subtiel tussen haakjes
-- add-page werkt nu enkel via externe zoek en kandidaatselectie
-- dashboard toont ook de speler-ID enkel tussen haakjes bij de naam
+UX-updates:
+- geen linkerbalk meer voor navigatie of bediening
+- selectiemethode standaard naam (voornaam + achternaam)
+- ID staat enkel nog subtiel tussen haakjes
+- spelerpagina toont laatste update + refreshknop
+- technische periodes en ruwe data alleen nog in debug
+- match explorer toont nu ook winst/verlies ratio binnen de actieve filters
+- manueel toevoegen is verwijderd
+- teampagina voorlopig als preview, klaar voor latere uitbreiding

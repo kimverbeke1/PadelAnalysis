@@ -1,10 +1,10 @@
 cd "C:\Users\verbekki\OneDrive - Spraying Systems Co\Private\PadelAnalysis"
 
-# Pak PadelAnalysis_ui_cleanup_bundle.zip uit in deze map en overschrijf bestaande files
+# Pak PadelAnalysis_vclean_final_ui.zip uit in deze map en overschrijf bestaande files
 
 git status
 git add .
-git commit -m "Remove manual add and de-emphasize IDs"
+git commit -m "V-clean final UI"
 git push
 
 # lokaal testen
