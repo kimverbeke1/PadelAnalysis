@@ -1,10 +1,10 @@
 cd "C:\Users\verbekki\OneDrive - Spraying Systems Co\Private\PadelAnalysis"
 
-# Pak PadelAnalysis_vclean_final_ui.zip uit in deze map en overschrijf bestaande files
+# Pak PadelAnalysis_vclean_final_ui_v2.zip uit in deze map en overschrijf bestaande files
 
 git status
 git add .
-git commit -m "V-clean final UI"
+git commit -m "V-clean final UI V2 UX fixes"
 git push
 
 # lokaal testen
