@@ -1,13 +1,11 @@
 cd "C:\Users\verbekki\OneDrive - Spraying Systems Co\Private\PadelAnalysis"
 
-# Pak PadelAnalysis_v2_namefix_bundle.zip uit in deze map en overschrijf bestaande files
+# Pak PadelAnalysis_cleanup_fix_vnext.zip uit in deze map en overschrijf bestaande files
 
 git status
 git add .
-git commit -m "Fix names, improve add user UI, reduce failed periods"
+git commit -m "Cleanup failed periods handling"
 git push
 
 # lokaal testen
-py -m pip install -r requirements.txt
-py -m playwright install chromium
 py -m streamlit run dashboard.py

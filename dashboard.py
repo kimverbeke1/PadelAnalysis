@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -342,17 +342,19 @@ def render_dashboard_page():
     winrate = float(stats.get("winrate", 0.0) or 0.0)
     periods_processed = raw_data.get("periods_processed", [])
     empty_periods = raw_data.get("empty_periods", [])
-    failed_periods = raw_data.get("failed_periods", [])
+    failed_last_run = raw_data.get("failed_periods_last_run", raw_data.get("failed_periods", []))
+    failed_open = raw_data.get("failed_periods_open", raw_data.get("failed_periods", []))
 
     st.subheader(f"Speler {player.get('player_id', player_id)}")
     st.write(f"**Laatste update:** {player.get('last_updated', '-')}  ")
     st.write(f"**Schema:** {raw_data.get('schema_version', '-')}")
     render_metric_row(match_count, wins, losses, unknown, winrate, len(periods_processed))
 
-    s1, s2, s3 = st.columns(3)
+    s1, s2, s3, s4 = st.columns(4)
     s1.info(f"Verwerkte periodes: {len(periods_processed)}")
     s2.warning(f"Lege periodes: {len(empty_periods)}")
-    s3.error(f"Mislukte periodes (laatste run): {len(failed_periods)}")
+    s3.error(f"Mislukte periodes laatste run: {len(failed_last_run)}")
+    s4.info(f"Open mislukte periodes: {len(failed_open)}")
 
     tab_overview, tab_matches, tab_partners, tab_opponents, tab_raw = st.tabs([
         "Overzicht", "Match Explorer", "Partners", "Tegenstanders", "Ruwe data"
@@ -366,11 +368,6 @@ def render_dashboard_page():
                 render_donut_chart(wins, losses)
             else:
                 st.info("Nog geen wins/losses beschikbaar.")
-            st.markdown("### Snelle inzichten")
-            if not partner_summary.empty:
-                st.write("**Top partner:**", partner_summary.iloc[0]["partner"])
-            if not opponent_summary.empty:
-                st.write("**Vaakste tegenstander:**", opponent_summary.iloc[0]["tegenstander"])
         with right:
             st.markdown("### Trend per periode")
             if not period_summary.empty:
@@ -378,15 +375,6 @@ def render_dashboard_page():
                 st.dataframe(period_summary, use_container_width=True, height=320)
             else:
                 st.info("Geen periodeoverzicht beschikbaar.")
-        a, b = st.columns(2)
-        with a:
-            st.markdown("### Top partners")
-            if not partner_summary.empty:
-                st.dataframe(partner_summary.head(10), use_container_width=True, height=320)
-        with b:
-            st.markdown("### Top ranking-combinaties")
-            if not ranking_summary.empty:
-                st.dataframe(ranking_summary.head(10), use_container_width=True, height=320)
 
     with tab_matches:
         st.markdown("### Match Explorer")
@@ -458,19 +446,17 @@ def render_dashboard_page():
         st.write("**Debug log file:**", raw_data.get("debug_log_file", "-"))
         st.write("**Aantal ruwe matches:**", raw_data.get("matches_count", 0))
         if show_debug_info:
-            d1, d2, d3 = st.columns(3)
+            d1, d2 = st.columns(2)
             with d1:
-                st.write("**Verwerkte periodes**")
-                st.write(periods_processed if periods_processed else [])
-            with d2:
                 st.write("**Lege periodes**")
                 st.write(empty_periods if empty_periods else [])
-            with d3:
-                st.write("**Mislukte periodes (laatste run)**")
-                st.write(failed_periods if failed_periods else [])
-            st.markdown("### Ronde-overzicht")
-            if not round_summary.empty:
-                st.dataframe(round_summary, use_container_width=True, height=320)
+                st.write("**Mislukte periodes laatste run**")
+                st.write(failed_last_run if failed_last_run else [])
+            with d2:
+                st.write("**Open mislukte periodes**")
+                st.write(failed_open if failed_open else [])
+                st.write("**Verwerkte periodes**")
+                st.write(periods_processed if periods_processed else [])
         if show_raw:
             st.markdown("### Ruwe player data")
             st.json(player)

@@ -1,11 +1,11 @@
-PADELANALYSIS - V2 NAME + ADD USER IMPROVEMENTS
-==============================================
+PADELANALYSIS - CLEANUP FIX V-NEXT
+=================================
 
-Aangepast:
-- naamprobleem opgelost in player_search.py:
-  - echte naam wordt nu uit de resultaatcontainer gehaald
-  - 'Profiel bekijken' wordt niet meer als display_name opgeslagen
-- dashboard heeft nu een echte knop 'Zoek speler' i.p.v. impliciete zoeking bij Enter
-- voornaam en achternaam zijn aparte velden op dashboard en op 'Gebruiker toevoegen'
-- op 'Gebruiker toevoegen' wordt club getoond bij kandidaten
-- scraper toont enkel mislukte periodes van de laatste run, en probeert periode-selecties opnieuw
+Nieuw in deze cleanup-fix:
+- failed_periods wordt opgeschoond:
+  - succesvol herhaalde periodes verdwijnen uit open failures
+  - failed_periods_last_run toont alleen de laatste scrape
+  - failed_periods_open toont nog open/onopgeloste failures
+- dashboard toont nu standaard de teller van de laatste run, zodat oude ontbrekende periodes niet meer misleidend blijven hangen
+
+Dit is een patch bovenop je huidige V2-naamfix versie.

@@ -196,19 +196,19 @@ def select_period(page, selector_info, option):
         return False, "no_selector"
     sel = page.locator("select").nth(selector_info["index"])
     attempts = []
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             if option.get("value") is not None:
                 sel.select_option(value=option["value"], timeout=5000)
             else:
                 sel.select_option(label=option["label"], timeout=5000)
-            state = wait_for_results_state(page)
+            state = wait_for_results_state(page, timeout_ms=15000)
             attempts.append(state)
             if state in ("tables", "empty"):
                 return True, state
         except Exception:
             attempts.append("exception")
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(1200)
     return False, ",".join(attempts)
 
 
@@ -310,10 +310,8 @@ def parse_row_structured(row_text: str) -> Dict[str, Optional[str]]:
 
 def collect_structured_rows(page, current_period: str) -> List[Dict]:
     out = []
-    state = wait_for_results_state(page)
-    if state == "empty":
-        return out
-    if state == "timeout":
+    state = wait_for_results_state(page, timeout_ms=8000)
+    if state in ("empty", "timeout"):
         return out
     try:
         page.wait_for_selector('table', state='attached', timeout=5000)
@@ -352,6 +350,14 @@ def calculate_stats(matches: List[Dict]) -> Dict[str, float]:
     return {'matches': len(matches), 'wins': wins, 'losses': losses, 'unknown_results': unknown, 'winrate': round((wins / known) * 100, 2) if known else 0.0}
 
 
+def unique_keep_order(items: List[str]) -> List[str]:
+    seen = set(); out = []
+    for item in items:
+        if item not in seen:
+            seen.add(item); out.append(item)
+    return out
+
+
 def merge_incremental_data(existing_player: Optional[Dict], new_matches: List[Dict], periods_processed_now: List[str], empty_periods_now: List[str], failed_periods_now: List[str], scrape_mode: str, refresh_recent_periods: int) -> Dict:
     existing_raw = existing_player.get('raw_data', {}) if isinstance(existing_player, dict) else {}
     existing_matches = existing_raw.get('matches', []) if isinstance(existing_raw, dict) else []
@@ -360,15 +366,23 @@ def merge_incremental_data(existing_player: Optional[Dict], new_matches: List[Di
     combined_matches = dedupe_matches(preserved_old + new_matches)
     stats = calculate_stats(combined_matches)
     now_iso = utc_now_iso()
+
+    previous_failed_open = existing_raw.get('failed_periods_open') or existing_raw.get('failed_periods') or []
+    # if a period is successfully processed now, remove it from open failures
+    previous_failed_open = [p for p in previous_failed_open if p not in periods_processed_now]
+    failed_open = unique_keep_order(failed_periods_now + previous_failed_open)
+
     raw_data = {
         'player_id': existing_player.get('player_id') if existing_player else None,
         'timestamp': now_iso,
         'matches_count': len(combined_matches),
-        'schema_version': 'v6_user-add-page_incremental',
-        'periods_processed': list(dict.fromkeys(periods_processed_now + (existing_raw.get('periods_processed', []) or []))),
-        'empty_periods': list(dict.fromkeys(empty_periods_now + (existing_raw.get('empty_periods', []) or []))),
-        # important: do NOT accumulate failed periods forever; only show current run failures
-        'failed_periods': failed_periods_now,
+        'schema_version': 'vnext_cleanup_failed_periods',
+        'periods_processed': unique_keep_order(periods_processed_now + (existing_raw.get('periods_processed', []) or [])),
+        'empty_periods': unique_keep_order(empty_periods_now + (existing_raw.get('empty_periods', []) or [])),
+        # compatibility field now means open unresolved failures, not full history
+        'failed_periods': failed_open,
+        'failed_periods_open': failed_open,
+        'failed_periods_last_run': failed_periods_now,
         'network_log_file': str(NETWORK_LOG_JSONL),
         'debug_log_file': str(SCRAPER_LOG_TXT),
         'matches': combined_matches,
