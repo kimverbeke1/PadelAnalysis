@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, quote, urljoin, urlparse
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 from firebase_service import get_player_search_cache, save_player_search_cache, save_player_profile
 
@@ -72,6 +72,8 @@ def detect_robot_page(page) -> bool:
 
 
 def extract_player_id_from_url(url: str) -> Optional[str]:
+    if not url:
+        return None
     try:
         parsed = urlparse(url)
         vals = parse_qs(parsed.query).get("userId")
@@ -80,10 +82,8 @@ def extract_player_id_from_url(url: str) -> Optional[str]:
         return None
 
 
-def _candidate_from_href(href: str, text: str = "") -> Optional[Dict]:
-    if not href:
-        return None
-    full_url = urljoin(BASE_SITE_URL, href)
+def _candidate_from_url_and_text(url: str, text: str = "") -> Optional[Dict]:
+    full_url = urljoin(BASE_SITE_URL, url)
     player_id = extract_player_id_from_url(full_url)
     if not player_id:
         return None
@@ -92,16 +92,16 @@ def _candidate_from_href(href: str, text: str = "") -> Optional[Dict]:
         "club": None,
         "player_id": player_id,
         "dashboard_url": full_url,
-        "source": "profile_button_or_link",
+        "source": "search_result",
     }
 
 
-def _dedupe_and_store(candidates: List[Dict]) -> List[Dict]:
+def _save_profiles(candidates: List[Dict]) -> List[Dict]:
     unique = []
     seen = set()
     for c in candidates:
         key = (c.get("player_id"), c.get("dashboard_url"))
-        if key not in seen and c.get("player_id"):
+        if c.get("player_id") and key not in seen:
             seen.add(key)
             unique.append(c)
     for c in unique:
@@ -115,81 +115,27 @@ def _dedupe_and_store(candidates: List[Dict]) -> List[Dict]:
     return unique
 
 
-def extract_candidates_from_page(page) -> List[Dict]:
+def extract_dashboard_links(page) -> List[Dict]:
     candidates: List[Dict] = []
-
-    # First try classic direct dashboard links.
     try:
         links = page.locator("a")
         for i in range(links.count()):
             try:
                 href = links.nth(i).get_attribute("href") or ""
-                text = clean_text(links.nth(i).inner_text(timeout=500))
+                text = clean_text(links.nth(i).inner_text(timeout=400))
             except Exception:
                 continue
-            if "dashboard/resultaten" in href and "userId=" in href:
-                c = _candidate_from_href(href, text)
+            if "userId=" in href:
+                c = _candidate_from_url_and_text(href, text)
+                if c:
+                    candidates.append(c)
+            elif "/dashboard/resultaten" in href:
+                c = _candidate_from_url_and_text(href, text)
                 if c:
                     candidates.append(c)
     except Exception:
         pass
-
-    # Then try explicit profile buttons/links.
-    try:
-        profile_controls = page.get_by_text("Profiel bekijken", exact=False)
-        count = profile_controls.count()
-        log_line(f"Aantal 'Profiel bekijken' controls gevonden: {count}")
-        for i in range(count):
-            ctrl = profile_controls.nth(i)
-            href = None
-            label_text = None
-            try:
-                href = ctrl.get_attribute("href")
-            except Exception:
-                href = None
-            try:
-                label_text = clean_text(ctrl.inner_text(timeout=500))
-            except Exception:
-                label_text = None
-
-            # If the control itself has no href, inspect closest parent anchor.
-            if not href:
-                try:
-                    href = ctrl.evaluate(
-                        """el => {
-                            const a = el.closest('a');
-                            return a ? a.getAttribute('href') : null;
-                        }"""
-                    )
-                except Exception:
-                    href = None
-
-            # If still no href, inspect onclick/data attributes on the button or parent.
-            if not href:
-                try:
-                    href = ctrl.evaluate(
-                        """el => {
-                            const node = el.closest('a,button,div');
-                            if (!node) return null;
-                            const attrs = ['href','data-href','data-url','onclick'];
-                            for (const attr of attrs) {
-                                const val = node.getAttribute && node.getAttribute(attr);
-                                if (val && val.includes('userId=')) return val;
-                            }
-                            return null;
-                        }"""
-                    )
-                except Exception:
-                    href = None
-
-            if href:
-                c = _candidate_from_href(href, label_text or "Profiel bekijken")
-                if c:
-                    candidates.append(c)
-    except Exception:
-        pass
-
-    return _dedupe_and_store(candidates)
+    return _save_profiles(candidates)
 
 
 def click_search_button_if_needed(page):
@@ -216,6 +162,123 @@ def click_search_button_if_needed(page):
         return False
 
 
+def _extract_href_from_control(control) -> Optional[str]:
+    href = None
+    try:
+        href = control.get_attribute("href")
+    except Exception:
+        pass
+    if href:
+        return href
+
+    # closest anchor
+    try:
+        href = control.evaluate(
+            """el => {
+                const a = el.closest('a');
+                return a ? a.getAttribute('href') : null;
+            }"""
+        )
+    except Exception:
+        href = None
+    if href:
+        return href
+
+    # data-href / data-url / onclick on self or nearby wrapper
+    try:
+        href = control.evaluate(
+            """el => {
+                const node = el.closest('a,button,div,article,li,tr') || el;
+                const attrs = ['href', 'data-href', 'data-url', 'onclick'];
+                for (const attr of attrs) {
+                    const val = node.getAttribute && node.getAttribute(attr);
+                    if (val && typeof val === 'string' && val.includes('userId=')) return val;
+                }
+                return null;
+            }"""
+        )
+    except Exception:
+        href = None
+    return href
+
+
+def _extract_name_from_result_container(control) -> Optional[str]:
+    try:
+        txt = control.evaluate(
+            """el => {
+                const row = el.closest('article, li, tr, .views-row, .search-result, .card, .row') || el.parentElement;
+                return row ? row.innerText : el.innerText;
+            }"""
+        )
+        txt = clean_text(txt)
+        if txt:
+            # remove profiel bekijken from captured block if present
+            txt = txt.replace('Profiel bekijken', '').strip(' -')
+        return txt or None
+    except Exception:
+        return None
+
+
+def extract_profile_buttons(page) -> List[Dict]:
+    candidates: List[Dict] = []
+    controls = []
+
+    for getter_name, getter in [
+        ("text", lambda: page.get_by_text("Profiel bekijken", exact=False)),
+        ("button-role", lambda: page.get_by_role("button", name="Profiel bekijken")),
+        ("link-role", lambda: page.get_by_role("link", name="Profiel bekijken")),
+    ]:
+        try:
+            loc = getter()
+            cnt = loc.count()
+            log_line(f"Aantal 'Profiel bekijken' controls via {getter_name}: {cnt}")
+            for i in range(cnt):
+                controls.append(loc.nth(i))
+        except Exception:
+            pass
+
+    # dedupe handles by attempted href/text combinations later
+    for idx, ctrl in enumerate(controls, start=1):
+        label_text = _extract_name_from_result_container(ctrl) or "Profiel bekijken"
+        href = _extract_href_from_control(ctrl)
+        if href:
+            c = _candidate_from_url_and_text(href, label_text)
+            if c:
+                candidates.append(c)
+                log_line(f"Kandidaat via href op profielcontrol {idx}: {c.get('player_id')}")
+                continue
+
+        # If no href available, click the control and inspect navigation result.
+        try:
+            current_url = page.url
+            ctrl.click(timeout=2500)
+            page.wait_for_timeout(2500)
+            new_url = page.url
+            log_line(f"Profielcontrol {idx} geklikt. URL voor: {current_url} | na: {new_url}")
+
+            c = _candidate_from_url_and_text(new_url, label_text)
+            if c:
+                candidates.append(c)
+            else:
+                # maybe the profile page contains a dashboard link
+                nested = extract_dashboard_links(page)
+                if nested:
+                    candidates.extend(nested)
+
+            # go back if we navigated away
+            if page.url != current_url:
+                try:
+                    page.go_back(timeout=10000)
+                    page.wait_for_timeout(1500)
+                except Exception:
+                    pass
+        except Exception as e:
+            log_line(f"Klik op profielcontrol {idx} mislukte: {e}")
+            continue
+
+    return _save_profiles(candidates)
+
+
 def search_players(name_query: str, club: Optional[str] = None, sport: str = "Padel", headless: bool = True, use_cache: bool = True) -> List[Dict]:
     if use_cache:
         cached = get_player_search_cache(name_query, club=club, sport=sport)
@@ -240,9 +303,17 @@ def search_players(name_query: str, club: Optional[str] = None, sport: str = "Pa
             if detect_robot_page(page):
                 raise RuntimeError("Robot-check gedetecteerd op zoekpagina")
 
-            candidates = extract_candidates_from_page(page)
+            # First try any direct links already available
+            candidates = extract_dashboard_links(page)
             if candidates:
-                log_line(f"Kandidaten direct zichtbaar: {len(candidates)}")
+                log_line(f"Kandidaten direct zichtbaar via links: {len(candidates)}")
+                save_player_search_cache(name_query, club=club, sport=sport, candidates=candidates)
+                return candidates
+
+            # Then try profile buttons/controls already visible
+            candidates = extract_profile_buttons(page)
+            if candidates:
+                log_line(f"Kandidaten direct zichtbaar via profielcontrols: {len(candidates)}")
                 save_player_search_cache(name_query, club=club, sport=sport, candidates=candidates)
                 return candidates
 
@@ -250,9 +321,16 @@ def search_players(name_query: str, club: Optional[str] = None, sport: str = "Pa
             if click_search_button_if_needed(page):
                 if detect_robot_page(page):
                     raise RuntimeError("Robot-check gedetecteerd na zoektrigger")
-                candidates = extract_candidates_from_page(page)
+
+                candidates = extract_dashboard_links(page)
                 if candidates:
-                    log_line(f"Kandidaten gevonden na expliciete zoektrigger: {len(candidates)}")
+                    log_line(f"Kandidaten gevonden na expliciete zoektrigger via links: {len(candidates)}")
+                    save_player_search_cache(name_query, club=club, sport=sport, candidates=candidates)
+                    return candidates
+
+                candidates = extract_profile_buttons(page)
+                if candidates:
+                    log_line(f"Kandidaten gevonden na expliciete zoektrigger via profielcontrols: {len(candidates)}")
                     save_player_search_cache(name_query, club=club, sport=sport, candidates=candidates)
                     return candidates
 
