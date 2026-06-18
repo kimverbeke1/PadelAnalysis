@@ -1,0 +1,18 @@
+cd "C:\Users\verbekki\OneDrive - Spraying Systems Co\Private\PadelAnalysis"
+
+# 1) install packages if needed
+py -m pip install playwright beautifulsoup4
+py -m playwright install chromium
+
+# 2) run index-only test
+py tpv_main_v2.py
+
+# 3) if needed: edit tpv_main_v2.py and switch
+# MODE = 'index_only'
+# or MODE = 'phase1'
+
+# 4) commit
+git status
+git add tpv_models_v2.py tpv_parser_v2.py tpv_firebase_adapter_v2.py tpv_scraper_v2.py tpv_main_v2.py README_TPV_V2.txt POWERSHELL_TPV_V2.txt
+git commit -m "Add TPV scraper V2 proof of concept"
+git push
