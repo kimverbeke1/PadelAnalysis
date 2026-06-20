@@ -1,4 +1,4 @@
-import os
+﻿import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -150,6 +150,16 @@ def get_player_profile(player_id: str, converted: bool = True):
     return convert_firestore_values(data) if converted else data
 
 
+def get_app_settings() -> dict:
+    """Klein settings-document, o.a. wie 'jij' bent (home_player_id)."""
+    doc = db.collection("app_settings").document("main").get()
+    return doc.to_dict() if doc.exists else {}
+
+
+def save_app_settings(data: dict):
+    db.collection("app_settings").document("main").set(sanitize_for_firestore(data), merge=True)
+
+
 def search_player_profiles(name_query: str, club: Optional[str] = None, limit: int = 20, converted: bool = True):
     name_q = normalize_name(name_query)
     club_q = normalize_name(club or "")
@@ -189,3 +199,13 @@ def get_player_search_cache(name_query: str, club: Optional[str] = None, sport: 
         return None
     data = doc.to_dict()
     return convert_firestore_values(data) if converted else data
+
+
+def save_player_v2(player_id: str, player_data: dict):
+    """Save v2 schema player data directly, skipping legacy build_minimal_defaults."""
+    prepared = sanitize_for_firestore(dict(player_data))
+    prepared["player_id"] = str(player_id)
+    if "last_updated" not in prepared:
+        prepared["last_updated"] = utc_now_iso()
+    db.collection(PLAYERS_COLLECTION).document(str(player_id)).set(prepared, merge=False)
+    return prepared
